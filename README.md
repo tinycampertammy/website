@@ -47,8 +47,20 @@ terraform apply -var="hcloud_token=$HCLOUD_TOKEN" -var="ssh_key=$HCLOUD_SSH_KEY"
 
 ## Deploy It
 
+## Destroy Infrastructure
+
+If you don't need the setup anymore, you can delete it with the following command:
+
+```bash
+terraform destroy -var="hcloud_token=$HCLOUD_TOKEN" -var="ssh_key=$HCLOUD_SSH_KEY"
+```
+
 ## See Also
 
 [bitpoke wordpress-operator](https://github.com/bitpoke/wordpress-operator)
+
 [Hetzner Cloud](https://www.hetzner.com/cloud)[Terraform](https://registry.terraform.io/providers/hetznercloud/hcloud/latest/docs)
+
 [wordpress](https://wordpress.org)
+
+[CloudInit](https://cloudinit.readthedocs.io/en/latest)
