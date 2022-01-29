@@ -31,6 +31,14 @@ ssh-keygen -t ed25519 -a 100 -f $HCLOUD_SSH_KEY
 chmod 0644 $HCLOUD_SSH_KEY
 ```
 
+### K3sup
+
+Install k3sup via go install or follow the [official installation instructions](https://github.com/alexellis/k3sup#download-k3sup-tldr):
+
+```bash
+go install github.com/alexellis/k3sup@latest
+```
+
 ## Setup Infrastructure
 
 ```bash
@@ -49,10 +57,27 @@ terraform apply -var="hcloud_token=$HCLOUD_TOKEN" -var="ssh_key=$HCLOUD_SSH_KEY"
 
 ## Destroy Infrastructure
 
-If you don't need the setup anymore, you can delete it with the following command:
+If you don't need the setup anymore, you can delete it with the following command. But make sure to remove the delete protection on the server first, otherwise terraform will not be able to delete it. This serves as an extra layer of protection so that you don't remove the cluster by accident.
 
 ```bash
 terraform destroy -var="hcloud_token=$HCLOUD_TOKEN" -var="ssh_key=$HCLOUD_SSH_KEY"
+```
+
+## Deploy k3s
+
+Use output command of terraform apply to install k3s, it should look like:
+```
+deploy_k3s = "k3sup install --user root --ip <ip> --ssh-key <ssh-key>"
+```
+
+Test if you can reach the kubernetes cluster:
+
+```shell
+$ export KUBECONFIG=$PWD/kubeconfig
+$ kubectl get pods
+No resources found in default namespace.
+$ echo $?
+0
 ```
 
 ## See Also

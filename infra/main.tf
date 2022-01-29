@@ -19,7 +19,6 @@ resource "hcloud_ssh_key" "default" {
   public_key = file(var.ssh_key)
 }
 
-
 resource "hcloud_server" "web" {
   name  = "web-server-1"
   image = "ubuntu-20.04"
@@ -36,4 +35,9 @@ resource "hcloud_server" "web" {
 output "ssh_command" {
   description = "use this command to SSH into the VM"
   value = "ssh root@${hcloud_server.web.ipv4_address} -i ${trim(var.ssh_key, ".pub")}"
+}
+
+output "deploy_k3s" {
+  description = "use this command to deploy k3s"
+  value = "k3sup install --user root --ip ${hcloud_server.web.ipv4_address} --ssh-key ${trim(var.ssh_key, ".pub")}"
 }

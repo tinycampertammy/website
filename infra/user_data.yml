@@ -1,18 +1,25 @@
-# based on: https://medium.com/@orestovyevhen/set-up-infrastructure-in-hetzner-cloud-using-terraform-ce85491e92d
+# See Also:
+# - this cloud init config is mostly based on: https://medium.com/@orestovyevhen/set-up-infrastructure-in-hetzner-cloud-using-terraform-ce85491e92d
+# - https://k3s.io
 package_update: true
 package_upgrade: true
 packages:
   - fail2ban
   - ufw
 runcmd:
+# configure fail2ban
   - printf "[sshd]\nenabled = true\nbanaction = iptables-multiport" > /etc/fail2ban/jail.local
   - systemctl enable fail2ban
   - systemctl start fail2ban
+# only allow OpenSSH in firewall
   - ufw allow 'OpenSSH'
   - ufw enable
+# fine-tune SSH config
   - sed -ie '/^PasswordAuthentication/s/^.*$/PasswordAuthentication no/' /etc/ssh/sshd_config
   - sed -ie '/^X11Forwarding/s/^.*$/X11Forwarding no/' /etc/ssh/sshd_config
   - sed -ie '/^#MaxAuthTries/s/^.*$/MaxAuthTries 2/' /etc/ssh/sshd_config
   - sed -ie '/^#AllowTcpForwarding/s/^.*$/AllowTcpForwarding no/' /etc/ssh/sshd_config
   - sed -ie '/^#AllowAgentForwarding/s/^.*$/AllowAgentForwarding no/' /etc/ssh/sshd_config
   - systemctl restart ssh
+# configure k3s (installed later by user to get kubeconfig)
+  - ufw allow '6443' # kubernetes API
