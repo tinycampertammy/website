@@ -39,35 +39,30 @@ Install k3sup via go install or follow the [official installation instructions](
 go install github.com/alexellis/k3sup@latest
 ```
 
-## Setup Infrastructure
+## Deployment
+
+### Terraform
 
 ```bash
 cd infra/
-terraform init -var="hcloud_token=$HCLOUD_TOKEN" -var="ssh_key=$HCLOUD_SSH_KEY"
-terraform plan -var="hcloud_token=$HCLOUD_TOKEN" -var="ssh_key=$HCLOUD_SSH_KEY"
+export DEPLOYMENT_NAME="website-staging"
+terraform init -var="hcloud_token=$HCLOUD_TOKEN" -var="ssh_key=$HCLOUD_SSH_KEY" -var="$DEPLOYMENT_NAME"
+terraform plan -var="hcloud_token=$HCLOUD_TOKEN" -var="ssh_key=$HCLOUD_SSH_KEY" -var="$DEPLOYMENT_NAME"
+
 ```
 
 If you agree to the plan proposed by `terraform plan` you can create the infrastructure:
 
 ```bash
-terraform apply -var="hcloud_token=$HCLOUD_TOKEN" -var="ssh_key=$HCLOUD_SSH_KEY"
+terraform apply -var="hcloud_token=$HCLOUD_TOKEN" -var="ssh_key=$HCLOUD_SSH_KEY" -var="$DEPLOYMENT_NAME"
 ```
 
-## Deploy It
+### k3s
 
-### Destroy Infrastructure
-
-If you don't need the setup anymore, you can delete it with the following command. But make sure to remove the delete protection on the server first, otherwise terraform will not be able to delete it. This serves as an extra layer of protection so that you don't remove the cluster by accident.
+Use the terraform output command to install k3s:
 
 ```bash
-terraform destroy -var="hcloud_token=$HCLOUD_TOKEN" -var="ssh_key=$HCLOUD_SSH_KEY"
-```
-
-### Deploy k3s
-
-Use output command of terraform apply to install k3s, it should look like:
-```
-deploy_k3s = "k3sup install --user root --ip <ip> --ssh-key <ssh-key>"
+$(terraform output -raw deploy_k3s)
 ```
 
 Test if you can reach the kubernetes cluster:
@@ -80,14 +75,32 @@ $ echo $?
 0
 ```
 
-### Install Stack
-
+Add an entry in the ssh config (optional):
+```bash
+$ printf %s\\n "$(terraform output -raw ssh_config)" | tee -a ~/.ssh/config
+Host <deployment-name>
+  Hostname <some-ip>
+  IdentityFile <path-to-ssh-file>
+  IdentitiesOnly Yes
+  User root
 ```
+
+### Wordpress
+
+Now what we have a working k3s cluster we can finally install `Wordpress` on it.
+The following installation commands are mostly derived from [bitpoke/stack](https://github.com/bitpoke/stack).
+
+Add bitpoke `helm repository`:
+
+```bash
 helm repo add bitpoke https://helm-charts.bitpoke.io
 helm repo update
+```
 
+Install `cert-manager` and two `ClusterIssuer`s. One for letsencrypt staging and one for production.
+
+```bash
 export CERT_MANAGER_VERSION=1.6.1
-
 helm repo add jetstack https://charts.jetstack.io
 helm repo update
 
@@ -99,191 +112,180 @@ helm install \
   --namespace cert-manager \
   --version v$CERT_MANAGER_VERSION
 
-kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/application/c8e2959e57a02b3877b394984a288f9178977d8b/config/crd/bases/app.k8s.io_applications.yaml
 
-export STACK_VERSION=0.12.0
+export EMAIL="todo"
+cat << EOF | kubectl apply -f -
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+spec:
+  acme:
+    email: ${EMAIL}
+    preferredChain: ""
+    privateKeySecretRef:
+      name: letsencrypt-staging
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    solvers:
+    - http01:
+        ingress:
+          class: bitpoke-stack
+EOF
+cat << EOF | kubectl apply -f -
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-production
+spec:
+  acme:
+    email: ${EMAIL}
+    preferredChain: ""
+    privateKeySecretRef:
+      name: letsencrypt-production
+    server: https://acme-v02.api.letsencrypt.org/directory
+    solvers:
+    - http01:
+        ingress:
+          class: bitpoke-stack
+EOF
+```
+
+// TODO: is this required ?
+```
+kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/application/c8e2959e57a02b3877b394984a288f9178977d8b/config/crd/bases/app.k8s.io_applications.yaml
+```
+
+Install stack:
+
+```bash
+export STACK_VERSION=0.12.1
 helm install \
     stack bitpoke/stack \
     --create-namespace \
     --namespace bitpoke-stack \
     --version v$STACK_VERSION \
     -f https://raw.githubusercontent.com/bitpoke/stack/v$STACK_VERSION/presets/minikube.yaml
+```
 
-export STACK_VERSION=0.12.0
+Install wordpress site:
+
+> **NOTE:** Use `letsencrypt-staging` until you know your setup is working properly. Otherwise you will hit the letsencrypt rate limit. Then use `letsencrypt-production`.
+
+export DOMAIN="e.g. wordpress.yourdomain.de"
+
+```bash
 helm install \
     mysite bitpoke/wordpress-site \
     --version v$STACK_VERSION \
-    --set 'site.domains[0]=www.example.com'
-# the above does not work
-helm install mysite presslabs/wordpress-site --create-namespace  --set "site.domains[0]=www.mysite.com"
+    --set "site.domains[0]=${DOMAIN}" \
+    --set 'site.issuerName=letsencrypt-staging' \
+    --set 'tls.issuerName=letsencrypt-staging'
 ```
 
-### Install wordpress-operator
+At this point (might take some minutes) you should have the following state in your kubernetes cluster: a working `wordpress` and `mysqlcluster` CR as well as a ready `Certificate`.
 
 ```shell
-$ helm repo add bitpoke https://helm-charts.bitpoke.io
-"bitpoke" has been added to your repositories
+$ kubectl get wordpresses.wordpress.presslabs.org,mysqlclusters.mysql.presslabs.org -A
+NAMESPACE   NAME                                       IMAGE   WP-CRON
+default     wordpress.wordpress.presslabs.org/mysite           True
 
-$ helm install wordpress-operator bitpoke/wordpress-operator
-NAME: wordpress-operator
-LAST DEPLOYED: Sat Jan 29 11:48:55 2022
-NAMESPACE: default
-STATUS: deployed
-REVISION: 1
-TEST SUITE: None
-NOTES:
-WordPress Operator installed in default
-```
-
-Ensure the operator got installed:
-```shell
-$ kubectl get deployments.apps -l app.kubernetes.io/instance=wordpress-operator
-NAME                 READY   UP-TO-DATE   AVAILABLE   AGE
-wordpress-operator   1/1     1            1           4m21s
+NAMESPACE   NAME                                      READY   REPLICAS   AGE
+default     mysqlcluster.mysql.presslabs.org/mysite   True    1          10m
 ```
 
 ```shell
-cat << EOF | kubectl apply -f -
-apiVersion: wordpress.presslabs.org/v1alpha1
-kind: Wordpress
-metadata:
-  name: mysite
-spec:
-  replicas: 1
-  domains:
-    - example.com
-  code: # where to find the code
-    emptyDir: {}
-  media: # where to find the media files
-    emptyDir: {}
-  bootstrap: # wordpress install config
-    env:
-      - name: WORDPRESS_BOOTSTRAP_USER
-        value: wordpress
-      - name: WORDPRESS_BOOTSTRAP_PASSWORD
-        value: wordpress
-      - name: WORDPRESS_BOOTSTRAP_EMAIL
-        value: wordpress@wordpress.org
-      - name: WORDPRESS_BOOTSTRAP_TITLE
-        value: wordpress
-  # extra env variables for the WordPress container
-  env:
-    - name: DB_HOST
-      value: mysql
-    - name: DB_USER
-      value: wordpress
-    - name: DB_PASSWORD
-      value: wordpress
-    - name: DB_NAME
-      value: wordpress
-EOF
+$ kubectl tree certificate mysite-tls
+NAMESPACE  NAME                                   READY  REASON  AGE
+default    Certificate/mysite-tls                 True   Ready   3m27s
+default    └─CertificateRequest/mysite-tls-bq9kh  True   Issued  3m26s
+default      └─Order/mysite-tls-bq9kh-1964038611  -              3m26s
 ```
 
-### Install mysql-operator
+As soon as your certificate is ready you can issue a HTTP request against your website. Because we are still using the `letsencrypt-staging` ClusterIssuer the TLS certificate is not valid, but this is expected.
+That means that the certificate issueing using Letsencrypt works.
 
-Deploy the mysql-operator:
+```shell
+$ curl -vkL https://${DOMAIN} 2>&1 |grep -A 5 "Server certificate"
+* Server certificate:
+*  subject: CN=<domain>
+*  start date: Feb 12 07:41:47 2022 GMT
+*  expire date: May 13 07:41:46 2022 GMT
+*  issuer: C=US; O=(STAGING) Let's Encrypt; CN=(STAGING) Artificial Apricot R3
+*  SSL certificate verify result: unable to get local issuer certificate (20), continuing anyway.
+* Using HTTP2, server supports multi-use
+```
+
+Its time for a valid TLS certificate so we will use the `letsencrypt-production` issuer now:
 
 ```bash
-helm repo add bitpoke https://helm-charts.bitpoke.io
-helm install mysql-operator bitpoke/mysql-operator
+helm upgrade \
+    mysite bitpoke/wordpress-site \
+    --set 'site.issuerName=letsencrypt-production' \
+    --set 'tls.issuerName=letsencrypt-production'
 ```
 
+You should be able to visit your website at https://${DOMAIN} now 😃.
+Better be quick and create a Wordpress user because now that the site is exposed to the internet everyone can create a user as well.
 
-Deploy the mysql database:
+### See Also
+
+- [Offcial Bitpoke documentation](https://www.bitpoke.io/docs/stack/how-to/deploy-wordpress-on-stack/)
+
+### Troubleshooting
+
+#### Letsencrypt certificate not issued
+
+```shell
+$ kubectl logs -n cert-manager -l app.kubernetes.io/component=controller,app.kubernetes.io/instance=cert-manager
+```
+
+#### Debugging the wordpress pod
+
+There is a shell in the wordpress container which is nice for debugging but bad for security:
 
 ```bash
-cat << EOF | kubectl apply -f -
-apiVersion: v1
-kind: Secret
-metadata:
-  name: my-secret
-type: Opaque
-stringData:
-  # root password is required to be specified
-  # TODO:
-  ROOT_PASSWORD: wordpress
-  ## application credentials that will be created at cluster bootstrap
-  DATABASE: wordpress
-  USER: wordpress
-  PASSWORD: wordpress
-EOF
-# TODO: scale down to 1 replica
-kubectl apply -f https://raw.githubusercontent.com/bitpoke/mysql-operator/master/examples/example-cluster.yaml
-```
-
-You should see following message in the mysite pod now:
-
-```shell
-$ kubectl logs mysite-8549bfbbc6-qxmb9 -c install-wp -f
-Success: WordPress installed successfully.
-```
-
-
-## Troubleshooting
-
-### Database Connectivity
-
-This is just a symptom, but not the root cause:
-
-```shell
-$ kubectl logs -n default wordpress-operator-758bd4787c-7mh59 -f
-
-_cron\": context deadline exceeded" "controller"="wp-cron-controller" "key"={"Namespace":"default","Name":"mysite"}
-```
-
-Instead check the website pod:
-```shell
-$ kubectl logs mysite-7d5f4c7669-kt47w -c install-wp
-Error: Error establishing a database connection. This either means that the username and password information in your `wp-config.php` file is incorrect or we can’t contact the database server at `mysite-mysql`. This could mean your host’s database server is down.
-```
-
-### Worpress Config
-
-The logs of the mysite pod show the following error for the install-wp init container:
-
-```bash
-$ kubectl logs mysite-bf9b59d4c-8sqtq -c install-wp -f
-Error: The 'wordpress' email address is invalid.
-```
-
-The fix is to set spec.bootstrap.env.WORDPRESS_BOOTSTRAP_EMAIL to a valid email in the wordpress.presslabs.org instance mysite.
-
-```bash
-kubectl edit wordpresses.wordpress.presslabs.org mysite
-```
-
-### Wordpress Site not coming up
-
-```shell
-$ kubectl port-forward mysite-8549bfbbc6-qxmb9 9145
-Forwarding from 127.0.0.1:9145 -> 9145
-Forwarding from [::1]:9145 -> 9145
-Handling connection for 9145
-Handling connection for 9145
-Handling connection for 9145
-```
-
-```shell
-$ k get wordpresses.wordpress.presslabs.org
-NAME     IMAGE   WP-CRON
-mysite           True
-# This is true for very troubleshoot so far
-
-$ k logs mysite-8549bfbbc6-qxmb9 -f
-2022/01/29 17:03:36 [error] 43#43: *1253 open() "/var/lib/nginx/html/index.html" failed (2: No such file or directory), client: 127.0.0.1, server: , request: "GET /index.html HTTP/1.1", host: "localhost:9145"
-
-```
-
-
-## Random Notes
-
-- there is a shell in wordpress container, nice for debugging bad for security :/
-```
-k exec -it mysite-8549bfbbc6-qxmb9 -c wordpress sh
+$ kubectl exec -it mysite-8549bfbbc6-qxmb9 -c wordpress sh
 kubectl exec [POD] [COMMAND] is DEPRECATED and will be removed in a future version. Use kubectl exec [POD] -- [COMMAND] instead.
 $ ls
 web  wp-cli.yml
-$
+```
+
+## Maintenance
+
+### Updating Wordpress version
+
+How to update wordpress version:
+
+```bash
+$ helm upgrade mysite bitpoke/wordpress-site \
+  --set 'image.repository=bitpoke/wordpress-runtime' \
+  --set 'image.tag=5.9'
+```
+
+See available tags here: https://hub.docker.com/r/bitpoke/wordpress-runtime/tags
+
+### Bitpoke chart updates
+
+You can search for the latest chart version
+
+```shell
+$ helm repo update
+$ helm search repo bitpoke
+NAME                            CHART VERSION   APP VERSION     DESCRIPTION
+bitpoke/bitpoke                 1.8.1           1.8.1           The Bitpoke App for WordPress provides a versat...
+bitpoke/mysql-cluster           0.6.2           v0.6.2          A Helm chart for easy deployment of a MySQL clu...
+bitpoke/mysql-operator          0.6.2           v0.6.2          A helm chart for Bitpoke Operator for MySQL
+bitpoke/stack                   0.12.1          v0.12.1         Your Open-Source, Cloud-Native WordPress Infras...
+bitpoke/wordpress-operator      0.12.1          v0.12.1         Bitpoke WordPress Operator Helm Chart
+bitpoke/wordpress-site          0.12.1          v0.12.1         Helm chart for deploying a WordPress site on Bi...
+```
+
+## Undeploy
+
+If you don't need the setup anymore, you can delete it with the following command. But make sure to remove the delete protection on the server first, otherwise terraform will not be able to delete it. This serves as an extra layer of protection so that you don't remove the cluster by accident.
+
+```bash
+terraform destroy -var="hcloud_token=$HCLOUD_TOKEN" -var="ssh_key=$HCLOUD_SSH_KEY" -var="$DEPLOYMENT_NAME"
 ```
 
 ## See Also
