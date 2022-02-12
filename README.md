@@ -1,6 +1,26 @@
 # website
 
-This document describes how to deploy the website for tinycampertammy.de. The website is backed by [wordpress](https://wordpress.org) and hosted on [Hetzner Cloud](https://www.hetzner.com/cloud) using the [wordpress-operator](https://github.com/bitpoke/wordpress-operator) and bootstrapped via [Terraform](https://registry.terraform.io/providers/hetznercloud/hcloud/latest/docs).
+This document describes how to deploy the website for tinycampertammy.de. The website is backed by [wordpress](https://wordpress.org) and hosted on [Hetzner Cloud](https://www.hetzner.com/cloud) using the [wordpress-operator](https://github.com/bitpoke/wordpress-operator) and bootstrapped via [Terraform](https://registry.terraform.io/providers/hetznercloud/hcloud/latest/docs) and [k3sup](https://github.com/alexellis/k3sup). TLS certificates are handled [cert-manager](https://github.com/jetstack/cert-manager) using [Letsencrypt CA](https://letsencrypt.org).
+
+<!-- generate me with markdown-toc 
+```bash
+// source: https://github.com/jonschlinkert/markdown-toc
+markdown-toc -i --maxdepth 2 README.md
+Do NOT TOUCH anything between the toc comments because this is used as a `marker` where to place the toc for markdown-toc.
+```
+-->
+
+**TOC**:
+
+<!-- toc -->
+
+- [Prerequisites](#prerequisites)
+- [Deployment](#deployment)
+- [Maintenance](#maintenance)
+- [Undeploy](#undeploy)
+- [See Also](#see-also-1)
+
+<!-- tocstop -->
 
 ## Prerequisites
 
