@@ -1,6 +1,9 @@
 # website
 
-This document describes how to deploy the website for tinycampertammy.de. The website is backed by [wordpress](https://wordpress.org) and hosted on [Hetzner Cloud](https://www.hetzner.com/cloud) using the [wordpress-operator](https://github.com/bitpoke/wordpress-operator) and bootstrapped via [Terraform](https://registry.terraform.io/providers/hetznercloud/hcloud/latest/docs) and [k3sup](https://github.com/alexellis/k3sup). TLS certificates are handled [cert-manager](https://github.com/jetstack/cert-manager) using [Letsencrypt CA](https://letsencrypt.org).
+This document describes how to deploy the website for tinycampertammy.de. The website is backed by [wordpress](https://wordpress.org) and hosted on [Hetzner Cloud](https://www.hetzner.com/cloud) using the [wordpress-operator](https://github.com/bitpoke/wordpress-operator) and bootstrapped via [Terraform](https://registry.terraform.io/providers/hetznercloud/hcloud/latest/docs) and [k3sup](https://github.com/alexellis/k3sup). TLS certificates are handled by [cert-manager](https://github.com/jetstack/cert-manager) using [Letsencrypt CA](https://letsencrypt.org).
+
+Infrastructure cost:
+- a cheap [Hetzner CX21 server](https://www.hetzner.com/cloud) (**5,83€** per month)
 
 <!-- generate me with markdown-toc 
 ```bash
@@ -24,11 +27,10 @@ Do NOT TOUCH anything between the toc comments because this is used as a `marker
 
 ## Prerequisites
 
-### Terraform CLI
+### Terraform
 
-Follow the tutorial [Terraform CLI](https://learn.hashicorp.com/tutorials/terraform/install-cli#install-terraform)
 
-or use these insructions for Mac OS:
+Follow the [Terraform CLI](https://learn.hashicorp.com/tutorials/terraform/install-cli#install-terraform) tutorial or use these insructions for Mac OS:
 
 ```bash
 brew tap hashicorp/tap
@@ -37,13 +39,13 @@ brew install hashicorp/tap/terraform
 
 ### HCloud Setup & SSH Key
 
-Get token from Hetzner Cloud by following this [tutorial](https://docs.hetzner.com/cloud/api/getting-started/generating-api-token/)
+Get token from Hetzner Cloud by following this [tutorial](https://docs.hetzner.com/cloud/api/getting-started/generating-api-token/).
 
 ```bash
 export HCLOUD_TOKEN=<TODO>
 ```
 
-Create SSH key:
+Create a SSH key:
 
 ```bash
 export HCLOUD_SSH_KEY=~/.ssh/hcloud_wordpress
@@ -59,7 +61,16 @@ Install k3sup via go install or follow the [official installation instructions](
 go install github.com/alexellis/k3sup@latest
 ```
 
+### Kubectl Tree plugin
+
+Optionally install the [kubectl tree plugin](https://github.com/ahmetb/kubectl-tree):
+
+```bash
+kubectl krew install tree
+```
+
 ## Deployment
+
 
 ### Terraform
 
@@ -82,17 +93,24 @@ terraform apply -var="hcloud_token=$HCLOUD_TOKEN" -var="ssh_key=$HCLOUD_SSH_KEY"
 Use the terraform output command to install k3s:
 
 ```bash
-$(terraform output -raw deploy_k3s)
+eval $(terraform output -raw deploy_k3s)
 ```
 
 Test if you can reach the kubernetes cluster:
 
 ```shell
 $ export KUBECONFIG=$PWD/kubeconfig
+
 $ kubectl get pods
 No resources found in default namespace.
 $ echo $?
 0
+```
+
+Rename the cluster name from default to $DEPLOYMENT_NAME:
+
+```bash
+kubectl config rename-context default $DEPLOYMENT_NAME
 ```
 
 Add an entry in the ssh config (optional):
@@ -103,6 +121,13 @@ Host <deployment-name>
   IdentityFile <path-to-ssh-file>
   IdentitiesOnly Yes
   User root
+```
+
+Now its time to configure DNS:
+
+```bash
+$ terraform output -raw dns
+Create a DNS A record and let it point to 65.21.154.121
 ```
 
 ### Wordpress
@@ -132,7 +157,6 @@ helm install \
   --namespace cert-manager \
   --version v$CERT_MANAGER_VERSION
 
-
 export EMAIL="todo"
 cat << EOF | kubectl apply -f -
 apiVersion: cert-manager.io/v1
@@ -151,6 +175,7 @@ spec:
         ingress:
           class: bitpoke-stack
 EOF
+
 cat << EOF | kubectl apply -f -
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
@@ -170,11 +195,6 @@ spec:
 EOF
 ```
 
-// TODO: is this required ?
-```
-kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/application/c8e2959e57a02b3877b394984a288f9178977d8b/config/crd/bases/app.k8s.io_applications.yaml
-```
-
 Install stack:
 
 ```bash
@@ -187,11 +207,23 @@ helm install \
     -f https://raw.githubusercontent.com/bitpoke/stack/v$STACK_VERSION/presets/minikube.yaml
 ```
 
+Set your domain and make sure the DNS name is resolvable:
+
+```bash
+export DOMAIN="e.g. wordpress.yourdomain.de"
+
+$ nslookup $DOMAIN
+Server:         127.0.0.1
+Address:        127.0.0.1#53
+
+Non-authoritative answer:
+Name:   <domain>
+Address: <IP>
+```
+
 Install wordpress site:
 
 > **NOTE:** Use `letsencrypt-staging` until you know your setup is working properly. Otherwise you will hit the letsencrypt rate limit. Then use `letsencrypt-production`.
-
-export DOMAIN="e.g. wordpress.yourdomain.de"
 
 ```bash
 helm install \
@@ -225,7 +257,7 @@ As soon as your certificate is ready you can issue a HTTP request against your w
 That means that the certificate issueing using Letsencrypt works.
 
 ```shell
-$ curl -vkL https://${DOMAIN} 2>&1 |grep -A 5 "Server certificate"
+$ curl -vkL https://$DOMAIN 2>&1 |grep -A 5 "Server certificate"
 * Server certificate:
 *  subject: CN=<domain>
 *  start date: Feb 12 07:41:47 2022 GMT
@@ -243,6 +275,17 @@ helm upgrade \
     --set 'site.issuerName=letsencrypt-production' \
     --set 'tls.issuerName=letsencrypt-production'
 ```
+The new TLS certificate is valid now:
+
+```shell
+$ curl -vkL https://$DOMAIN 2>&1 |grep -A 5 "Server certificate"
+* Server certificate:
+*  subject: CN=<domain>
+*  start date: Feb 13 09:38:42 2022 GMT
+*  expire date: May 14 09:38:41 2022 GMT
+*  issuer: C=US; O=Let's Encrypt; CN=R3
+*  SSL certificate verify ok.
+```
 
 You should be able to visit your website at https://${DOMAIN} now 😃.
 Better be quick and create a Wordpress user because now that the site is exposed to the internet everyone can create a user as well.
@@ -255,6 +298,17 @@ Better be quick and create a Wordpress user because now that the site is exposed
 
 #### Letsencrypt certificate not issued
 
+Ensure ClusterIssuer are ready (problem could be wrong invalid email e.g.):
+
+```shell
+$ kubectl get clusterissuers.cert-manager.io -A
+NAME                     READY   AGE
+letsencrypt-production   False   71s
+letsencrypt-staging      False   69s
+```
+
+By checking the logs of cert-manager you should be able to spot the problem:
+
 ```shell
 $ kubectl logs -n cert-manager -l app.kubernetes.io/component=controller,app.kubernetes.io/instance=cert-manager
 ```
@@ -264,7 +318,7 @@ $ kubectl logs -n cert-manager -l app.kubernetes.io/component=controller,app.kub
 There is a shell in the wordpress container which is nice for debugging but bad for security:
 
 ```bash
-$ kubectl exec -it mysite-8549bfbbc6-qxmb9 -c wordpress sh
+$ kubectl exec -it mysite-8549bfbc6-qxmb9 -c wordpress bash
 kubectl exec [POD] [COMMAND] is DEPRECATED and will be removed in a future version. Use kubectl exec [POD] -- [COMMAND] instead.
 $ ls
 web  wp-cli.yml
@@ -312,7 +366,9 @@ terraform destroy -var="hcloud_token=$HCLOUD_TOKEN" -var="ssh_key=$HCLOUD_SSH_KE
 
 [bitpoke wordpress-operator](https://github.com/bitpoke/wordpress-operator)
 
-[Hetzner Cloud](https://www.hetzner.com/cloud)[Terraform](https://registry.terraform.io/providers/hetznercloud/hcloud/latest/docs)
+[Hetzner Cloud](https://www.hetzner.com/cloud)
+
+[Terraform Hetzner Provider](https://registry.terraform.io/providers/hetznercloud/hcloud/latest/docs)
 
 [wordpress](https://wordpress.org)
 
