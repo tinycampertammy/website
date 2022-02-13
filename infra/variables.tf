@@ -1,3 +1,7 @@
+variable "name" {
+  default = "website"
+}
+
 variable "hcloud_token" {
   sensitive = true
 }
@@ -7,5 +11,5 @@ variable "ssh_key" {
 }
 
 variable "server_type" {
-  default = "cx11"
+  default = "cx21"
 }
