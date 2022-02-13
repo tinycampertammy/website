@@ -318,8 +318,8 @@ $ kubectl logs -n cert-manager -l app.kubernetes.io/component=controller,app.kub
 There is a shell in the wordpress container which is nice for debugging but bad for security:
 
 ```bash
-$ kubectl exec -it mysite-8549bfbc6-qxmb9 -c wordpress bash
-kubectl exec [POD] [COMMAND] is DEPRECATED and will be removed in a future version. Use kubectl exec [POD] -- [COMMAND] instead.
+# kubectl exec -it mysite-5bdfff5967-6g4lb -c wordpress -- bash
+www-data@mysite-5bdfff5967-6g4lb:/app$
 $ ls
 web  wp-cli.yml
 ```
