@@ -1,5 +1,8 @@
 # website
 
+>**NOTE:** The setup is not used actively anymore since we decided to go with a hosted offering instead 😅
+---
+
 This document describes how to deploy the website for tinycampertammy.de. The website is backed by [wordpress](https://wordpress.org) and hosted on [Hetzner Cloud](https://www.hetzner.com/cloud) using the [wordpress-operator](https://github.com/bitpoke/wordpress-operator) and bootstrapped via [Terraform](https://registry.terraform.io/providers/hetznercloud/hcloud/latest/docs) and [k3sup](https://github.com/alexellis/k3sup). TLS certificates are handled by [cert-manager](https://github.com/jetstack/cert-manager) using [Letsencrypt CA](https://letsencrypt.org).
 
 Infrastructure cost:
